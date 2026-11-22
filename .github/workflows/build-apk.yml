@@ -1,0 +1,95 @@
+name: Build APK Release
+
+on:
+  release:
+    types: [published]
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Capacitor
+        run: npm install @capacitor/core @capacitor/cli @capacitor/android
+
+      - name: Configure Capacitor for Android
+        run: |
+          npx cap init music-pwa com.abhitej1216.musicpwa --web-dir=dist --no-sync
+        continue-on-error: true
+
+      - name: Copy build assets to Android
+        run: npx cap copy android
+        continue-on-error: true
+
+      - name: Build Android APK
+        working-directory: android
+        run: ./gradlew assembleRelease
+        continue-on-error: true
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-release
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-release
+          path: apk/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apk/*.apk
+          body: |
+            ## APK Release
+
+            Built automatically from source code.
+
+            ### To install:
+            1. Enable "Install unknown apps" in Settings
+            2. Download and open the APK on your Android device
+            3. Install the music player app
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
